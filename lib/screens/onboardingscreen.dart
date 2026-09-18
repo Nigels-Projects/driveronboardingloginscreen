@@ -3,6 +3,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/driverapp.dart';
+import 'admin_screen.dart';
 
 class OnboardingScreen extends StatefulWidget {
   final VoidCallback onToggleTheme;
@@ -27,6 +28,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final _step3Key = GlobalKey<FormState>();
 
   DriverApplication _application = DriverApplication();
+  final TextEditingController _otpController = TextEditingController();
 
   @override
   void initState() {
@@ -34,7 +36,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     _loadSavedDraft();
   }
 
-  // Load saved JSON string from SharedPreferences
   Future<void> _loadSavedDraft() async {
     final prefs = await SharedPreferences.getInstance();
     final savedData = prefs.getString('driver_application_draft');
@@ -42,24 +43,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       setState(() {
         _application = DriverApplication.fromJson(jsonDecode(savedData));
       });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Restored previous application draft!'),
-            duration: Duration(seconds: 2),
-          ),
-        );
-      }
     }
   }
 
-  // Persist state to local storage on change
   Future<void> _saveDraft() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('driver_application_draft', jsonEncode(_application.toJson()));
   }
 
-  // Clear saved local storage
   Future<void> _clearDraft() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('driver_application_draft');
@@ -67,11 +58,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       _application = DriverApplication();
       _currentStep = 0;
     });
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Draft cleared successfully.')),
-      );
-    }
   }
 
   Future<void> _pickDocument(FormFieldState<bool> state) async {
@@ -97,6 +83,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
     if (_currentStep == 0) {
       isCurrentStepValid = _step1Key.currentState?.validate() ?? false;
+      if (isCurrentStepValid && !_application.isPhoneVerified) {
+        _showOtpDialog();
+        return;
+      }
     } else if (_currentStep == 1) {
       isCurrentStepValid = _step2Key.currentState?.validate() ?? false;
     } else if (_currentStep == 2) {
@@ -113,18 +103,77 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
   }
 
+  void _showOtpDialog() {
+    _otpController.clear();
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Verify Phone Number'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Enter the 4-digit code sent to ${_application.phoneNumber} (Use: 1234)'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _otpController,
+              keyboardType: TextInputType.number,
+              maxLength: 4,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                labelText: 'OTP Code',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              if (_otpController.text == '1234') {
+                setState(() {
+                  _application.isPhoneVerified = true;
+                  _currentStep += 1;
+                });
+                _saveDraft();
+                Navigator.of(ctx).pop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Phone number verified successfully!')),
+                );
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Invalid OTP. Use code: 1234')),
+                );
+              }
+            },
+            child: const Text('Verify'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _submitApplication() async {
     setState(() => _isSubmitting = true);
 
     await Future.delayed(const Duration(milliseconds: 1500));
 
     if (!mounted) return;
-    setState(() => _isSubmitting = false);
 
-    // Clear saved storage on successful submission
+    // Save finalized application to persistent submitted list
     final prefs = await SharedPreferences.getInstance();
+    final List<String> submitted = prefs.getStringList('submitted_applications') ?? [];
+    
+    _application.submittedAt = DateTime.now();
+    submitted.add(jsonEncode(_application.toJson()));
+    
+    await prefs.setStringList('submitted_applications', submitted);
     await prefs.remove('driver_application_draft');
 
+    setState(() => _isSubmitting = false);
     _showSuccessDialog();
   }
 
@@ -132,11 +181,19 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Driver Onboarding Application'),
+        title: const Text('Driver Onboarding'),
         backgroundColor: Colors.indigo,
         foregroundColor: Colors.white,
-        centerTitle: true,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.admin_panel_settings),
+            tooltip: 'Admin Dashboard',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (context) => const AdminScreen()),
+              );
+            },
+          ),
           IconButton(
             icon: Icon(widget.isDarkMode ? Icons.light_mode : Icons.dark_mode),
             tooltip: 'Toggle Theme',
@@ -224,10 +281,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                               const SizedBox(height: 16),
                               TextFormField(
                                 initialValue: _application.phoneNumber,
-                                decoration: const InputDecoration(
+                                decoration: InputDecoration(
                                   labelText: 'Phone Number',
-                                  border: OutlineInputBorder(),
-                                  prefixIcon: Icon(Icons.phone),
+                                  border: const OutlineInputBorder(),
+                                  prefixIcon: const Icon(Icons.phone),
+                                  suffixIcon: _application.isPhoneVerified
+                                      ? const Icon(Icons.check_circle, color: Colors.green)
+                                      : null,
                                 ),
                                 keyboardType: TextInputType.phone,
                                 validator: (val) => val == null || val.length < 8
@@ -235,6 +295,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                                     : null,
                                 onChanged: (val) {
                                   _application.phoneNumber = val;
+                                  _application.isPhoneVerified = false;
                                   _saveDraft();
                                 },
                               ),
@@ -385,14 +446,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(
-                                        'Applicant: ${_application.fullName.isEmpty ? "—" : _application.fullName}'),
+                                    Text('Applicant: ${_application.fullName.isEmpty ? "—" : _application.fullName}'),
                                     const SizedBox(height: 4),
-                                    Text(
-                                        'Contact: ${_application.email.isEmpty ? "—" : _application.email} | ${_application.phoneNumber}'),
+                                    Text('Contact: ${_application.email.isEmpty ? "—" : _application.email} | ${_application.phoneNumber}'),
                                     const SizedBox(height: 4),
-                                    Text(
-                                        'Vehicle: ${_application.vehicleMakeModel.isEmpty ? "—" : _application.vehicleMakeModel}'),
+                                    Text('Vehicle: ${_application.vehicleMakeModel.isEmpty ? "—" : _application.vehicleMakeModel}'),
+                                    const SizedBox(height: 4),
+                                    Text('Phone Verified: ${_application.isPhoneVerified ? "Yes" : "No"}'),
                                   ],
                                 ),
                               ),
@@ -414,7 +474,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('Application Submitted Successfully'),
         content: Text(
-          'Thank you, ${_application.fullName}! Your registration details for ${_application.vehicleMakeModel} and attached file (${_application.licenseFileName}) have been encrypted and submitted for verification.',
+          'Thank you, ${_application.fullName}! Your registration has been saved to the database. You can review its status on the Admin Dashboard.',
         ),
         actions: [
           TextButton(
