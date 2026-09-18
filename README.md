@@ -28,3 +28,22 @@ lib/
 │   ├── onboardingscreen.dart   # Multi-step Form, OTP Modal & Draft Auto-save Logic
 │   └── admin_screen.dart       # Admin Approval Dashboard & Persistent Profile Management
 └── main.dart                   # Application Entry Point & Material 3 Theme Configuration
+
+🚀 Getting Started
+Prerequisites
+Flutter SDK (v3.0.0 or higher)
+
+Dart SDK
+
+Google Chrome or any modern Web Browser
+
+Running Locally (In Terminal)
+1. Clone the repository:
+git clone https://github.com/Nigels-Projects/driveronboardingloginscreen.git
+cd driveronboardingloginscreen (run this in bash in a terminal)
+
+2. Install dependencies:
+flutter pub get
+
+3. Start local web server:
+flutter run -d chrome
